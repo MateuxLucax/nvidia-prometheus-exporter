@@ -43,6 +43,7 @@ func (c Collector) Collect(ctx context.Context) (Snapshot, error) {
 		}
 		_ = mergeGPUFields(group.fields, group.specs, rows, byKey)
 	}
+	c.fillPowerDrawFallbacks(ctx, path, gpus)
 
 	var processes []Process
 	if c.EnableProcessMetrics {
@@ -116,6 +117,39 @@ func (c Collector) queryProcesses(ctx context.Context, path string, gpus []GPU) 
 		})
 	}
 	return processes, nil
+}
+
+func (c Collector) fillPowerDrawFallbacks(ctx context.Context, path string, gpus []GPU) {
+	for i := range gpus {
+		if _, ok := gpus[i].Values["power.draw"]; ok {
+			continue
+		}
+		value, err := c.queryPowerSampleAverage(ctx, path, gpus[i].Index)
+		if err != nil {
+			logOptionalQueryFailure("power-samples:"+gpus[i].Index, err)
+			continue
+		}
+		gpus[i].Values["power.draw"] = value
+	}
+}
+
+func (c Collector) queryPowerSampleAverage(ctx context.Context, path, index string) (float64, error) {
+	if index == "" {
+		return 0, fmt.Errorf("missing gpu index")
+	}
+
+	ctx, cancel := c.commandContext(ctx)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, path, "-i", index, "-q", "-d", "POWER").CombinedOutput()
+	if err != nil {
+		return 0, commandError(err, out)
+	}
+	value, ok := parsePowerSampleAverage(out)
+	if !ok {
+		return 0, fmt.Errorf("power sample average not found")
+	}
+	return value, nil
 }
 
 func parseGPUs(fields []string, specs []MetricSpec, rows [][]string) ([]GPU, error) {
@@ -247,6 +281,29 @@ func parseBoolMetric(raw string) (float64, bool) {
 	default:
 		return parseNumber(raw, unitRaw)
 	}
+}
+
+func parsePowerSampleAverage(out []byte) (float64, bool) {
+	inPowerSamples := false
+	for _, line := range strings.Split(string(out), "\n") {
+		line = clean(line)
+		if line == "" {
+			continue
+		}
+		if strings.Contains(line, "Power Samples") {
+			inPowerSamples = true
+			continue
+		}
+		if !inPowerSamples || !strings.HasPrefix(line, "Avg") {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			return 0, false
+		}
+		return parseNumber(parts[1], unitWatts)
+	}
+	return 0, false
 }
 
 func clean(v string) string {

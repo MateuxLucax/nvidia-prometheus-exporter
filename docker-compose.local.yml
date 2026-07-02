@@ -1,0 +1,15 @@
+services:
+  nvidia-exporter:
+    build: .
+    image: ghcr.io/mateuxlucax/nvidia-prometheus-exporter:latest
+    container_name: nvidia-prometheus-exporter
+    ports:
+      # /metrics is unauthenticated, so bind to loopback by default.
+      - "127.0.0.1:3000:3000"
+    environment:
+      - PORT=3000
+      - COLLECT_INTERVAL=5s
+      - COLLECT_TIMEOUT=3s
+      - ENABLE_PROCESS_METRICS=false
+    gpus: all
+    restart: unless-stopped

@@ -1,0 +1,13 @@
+# Go
+/bin/
+/dist/
+*.test
+coverage.out
+
+# Local tools
+.env
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
